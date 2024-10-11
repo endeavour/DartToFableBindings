@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:dartdoc/dartdoc.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/src/dart/element/element.dart';
+import 'package:collection/collection.dart';
 
 class Dependency {
   final Uri libraryUri;
@@ -26,6 +29,8 @@ class Dependency {
 }
 
 class FsGenerator implements Generator {
+  final Set<String> filesWritten = {};
+
   Dependency? dependency(
       LibraryElement? elementType, PackageGraph packageGraph) {
     if (elementType == null) return null;
@@ -45,7 +50,7 @@ class FsGenerator implements Generator {
     return positionalUntil != -1 && positionalUntil != parameters.length - 1? '[<NamedParams${positionalUntil != 0 ? '(fromIndex=$positionalUntil)' : ''}>] ' : '';
   }
   String renderParams(Iterable<ParameterElement> parameters) {
-    return '(${parameters.isEmpty ? '' : parameters.map((e) => '${e.isRequiredNamed || e.isRequiredPositional ? '' : '?'}${e.name} : ${e is TypeParameterElementType ? "'":''}${e.type.element?.name ?? e.type.alias?.element.name ?? e.type.getDisplayString(withNullability: true)}').reduce((value, element) => '$value, $element')})';
+    return '(${parameters.isEmpty ? '' : parameters.map((e) => '${e.isRequiredNamed || e.isRequiredPositional ? '' : '?'}${e.name} : ${e is TypeParameterElement ? "'":''}${e.type.element?.name ?? e.type.alias?.element.name ?? e.type.getDisplayString(withNullability: true)}').reduce((value, element) => '$value, $element')})';
   }
 
   String renderGenericArgs(Iterable<Element> genericParams) => genericParams
@@ -54,7 +59,7 @@ class FsGenerator implements Generator {
       : '<${genericParams.map((e) => "${e.kind == ElementKind.TYPE_PARAMETER ? "'":''}${e.name}").reduce((value, element) => '$value, $element')}>';
 
   @override
-  Future<void> generate(PackageGraph packageGraph, FileWriter writer) async {
+  Future<void> generate(PackageGraph packageGraph) async {
     for (final package in packageGraph.packages) {
       var buffer = StringBuffer();
 
@@ -70,6 +75,7 @@ class FsGenerator implements Generator {
             dependencies.add(dep);
           }
         }
+        
         for (final clazz in lib.classes) {
           if (!clazz.isCanonical) continue;
           final genericParams = clazz.typeParameters;
@@ -77,7 +83,7 @@ class FsGenerator implements Generator {
               renderGenericArgs(genericParams.map((e) => e.element!));
           var headerPrinted = false;
           var moreThanHeader = false;
-          var defaultConstructor = clazz.unnamedConstructor;
+          var defaultConstructor = clazz.constructors.firstWhereOrNull((x) => x.isUnnamedConstructor);
           final superClazz = (clazz.supertype?.isPublic ?? false) ? clazz.supertype : null;
           final superGenerics = renderGenericArgs(
               superClazz?.typeArguments.where((e) => e.type.element != null)
@@ -117,7 +123,11 @@ class FsGenerator implements Generator {
           buffer.writeln();
         }
 
-        writer.write('${lib.hashCode}.fs', buffer.toString());
+        final filename = '${lib.hashCode}.fs';
+        final file = File(filename);
+        await file.writeAsString(buffer.toString());
+        
+        writtenFiles.add(filename);
 
         print('$lib dependencies:');
         for (final d in dependencies) {
@@ -126,4 +136,7 @@ class FsGenerator implements Generator {
       }
     }
   }
+  
+  @override
+  Set<String> get writtenFiles => filesWritten;
 }
